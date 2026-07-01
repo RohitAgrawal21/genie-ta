@@ -62,6 +62,23 @@ def cached_analyze(sym: str) -> dict:
     return res
 
 
+def _clean(o):
+    """Recursively replace NaN/Inf with None so browsers can JSON.parse the reply
+    (Python emits bare NaN which is invalid JSON and breaks the frontend)."""
+    import math
+    if isinstance(o, float):
+        return None if (math.isnan(o) or math.isinf(o)) else o
+    if isinstance(o, dict):
+        return {k: _clean(v) for k, v in o.items()}
+    if isinstance(o, list):
+        return [_clean(v) for v in o]
+    return o
+
+
+def dumps(o) -> str:
+    return json.dumps(_clean(o))
+
+
 def suggest(q: str, limit=10):
     q = (q or "").strip().upper()
     if not q:
@@ -104,16 +121,16 @@ class Handler(BaseHTTPRequestHandler):
             elif u.path in ("/", "/index.html"):
                 self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
             elif u.path == "/api/suggest":
-                self._send(200, json.dumps(suggest(qs.get("q", [""])[0])))
+                self._send(200, dumps(suggest(qs.get("q", [""])[0])))
             elif u.path == "/api/analyze":
                 sym = qs.get("symbol", [""])[0].strip().upper()
                 if not sym:
-                    self._send(400, json.dumps({"ok": False, "error": "No symbol given."})); return
-                self._send(200, json.dumps(cached_analyze(sym)))
+                    self._send(400, dumps({"ok": False, "error": "No symbol given."})); return
+                self._send(200, dumps(cached_analyze(sym)))
             else:
-                self._send(404, json.dumps({"error": "not found"}))
+                self._send(404, dumps({"error": "not found"}))
         except Exception as e:  # never 500 the whole app
-            self._send(200, json.dumps({"ok": False, "error": f"Server error: {e}"}))
+            self._send(200, dumps({"ok": False, "error": f"Server error: {e}"}))
 
 
 _POPULAR = [  # warmed at startup so the common searches are near-instant

@@ -19,14 +19,21 @@ def _tone(good):
 
 def analyze(symbol: str, feed, cfg: dict, name: str | None = None) -> dict:
     data, failed = feed.fetch_universe([symbol])
-    if symbol not in data or len(data[symbol]) < 60:
+    ndays = len(data[symbol]) if symbol in data else 0
+    if ndays < 40:   # below this even short-term indicators (RSI/MACD) can't warm up
         return {"ok": False, "symbol": symbol,
-                "error": f"Couldn't get enough data for '{symbol}'. Check the ticker."}
+                "error": (f"'{symbol}' has only {ndays} days of trading data (needs ~40+). "
+                          "Likely a very recent listing — too new to analyze reliably.")
+                if ndays else f"No data found for '{symbol}'. Check the ticker."}
     bench_data, _ = feed.fetch_universe([cfg.get("benchmark", "^NSEI")])
     bench = bench_data.get(cfg.get("benchmark", "^NSEI"))
 
     d = compute_indicators(data[symbol])
     i = len(d) - 1
+    # history depth -> confidence flag. Under 200 bars the 200-day average doesn't
+    # exist yet, so the stock is a recent listing with unreliable long-term signals.
+    history_months = max(1, round(ndays / 21))
+    limited_history = ndays < 200
     g = lambda c: float(d[c].iat[i])
     px = g("Close")
 
@@ -147,18 +154,32 @@ def analyze(symbol: str, feed, cfg: dict, name: str | None = None) -> dict:
     resist1 = resists[0] if resists else px * 1.05
     resist2 = resists[1] if len(resists) > 1 else sma200
 
+    def _lvl(v):  # round, or None if not available (e.g. 200-DMA on a new listing)
+        return round(float(v), 1) if pd.notna(v) else None
+
     levels = {
-        "price": round(px, 1),
-        "buy_above": round(resist1, 1),          # confirmed-breakout trigger
-        "support": round(stop, 1),               # nearest floor
-        "stop_below": round(support2, 1),        # get-out level
-        "resistance": round(resist2, 1),         # bigger overhead
+        "price": _lvl(px),
+        "buy_above": _lvl(resist1),              # confirmed-breakout trigger
+        "support": _lvl(stop),                   # nearest floor
+        "stop_below": _lvl(support2),            # get-out level
+        "resistance": _lvl(resist2),             # bigger overhead
     }
+
+    # limited history downgrades confidence — long-term signals aren't reliable yet
+    if limited_history and conf == "high":
+        conf = "medium"
 
     return {
         "ok": True, "symbol": symbol, "name": name,
         "as_of": d.index[i].strftime("%Y-%m-%d"),
         "price": round(px, 1),
+        "history_months": history_months,
+        "limited_history": limited_history,
+        "history_note": (
+            f"Only ~{history_months} months of trading history available"
+            f"{' (recent listing)' if history_months < 12 else ''}. Long-term signals "
+            "(200-day trend, 52-week levels) aren't fully formed — treat this as a "
+            "short-term read with lower confidence." if limited_history else None),
         "verdict": {"action": action, "tone": tone, "confidence": conf,
                     "headline": headline, "reason": reason},
         "cards": cards,

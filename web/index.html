@@ -54,6 +54,7 @@ summary{cursor:pointer;font-weight:600;padding:8px 0;color:var(--acc)}
 .tag.neutral{background:var(--neubg);color:var(--neu)}
 .disc{color:var(--mut);font-size:12px;margin-top:18px;text-align:center;line-height:1.5}
 .err{background:var(--badbg);border:1px solid #f4c9c6;color:var(--bad);padding:14px 16px;border-radius:12px;margin-top:18px}
+.risk{background:var(--warnbg);border:1px solid #f2dfb0;color:#8a5d00;padding:11px 14px;border-radius:10px;margin:12px 0;font-size:13px;line-height:1.5}
 @media(max-width:560px){.cards{grid-template-columns:1fr}.lvtag{width:88px}}
 </style>
 <!-- Analytics: GoatCounter. Replace genieanalysis with your code (e.g. geniestock). -->
@@ -154,31 +155,35 @@ async function analyze(){
 function render(r){
   if(!r.ok){ $out.innerHTML=`<div class="err">⚠️ ${r.error||'Could not analyze.'}</div>`; return; }
   const v=r.verdict, L=r.levels;
+  const rupee=(x)=> (x===null||x===undefined) ? '<span class="muted">—</span>' : '₹'+x;
   const cards=r.cards.map(c=>
     `<div class="card ${c.tone}"><div class="lab"><span class="dot ${c.tone}"></span>${c.label}</div>
      <div class="mn">${c.meaning}</div></div>`).join('');
   const rules=r.rules.length ? r.rules.map(x=>
     `<div class="rule"><span>${x.id} · ${x.name}</span><span class="tag ${x.signal}">${x.signal.toUpperCase()}</span></div>`).join('')
     : '<div class="mn">No individual signals firing today.</div>';
+  const riskBanner = r.limited_history ?
+    `<div class="risk">⚠️ <b>Limited history:</b> ${r.history_note}</div>` : '';
   $out.innerHTML=`
     <div class="verdict ${v.tone}">
       <div><span class="badge">${v.action}</span><span class="conf">confidence: ${v.confidence}</span></div>
       <div class="headline">${v.headline}</div>
       <div class="reason">${v.reason}</div>
     </div>
+    ${riskBanner}
     <div class="meta"><b>${r.name||r.symbol}</b> (${r.symbol}) · ₹${r.price} · as of ${r.as_of}</div>
     <div class="cards">${cards}</div>
     <div class="levels"><h3>🧭 Simple price map</h3>
-      <div class="lvrow"><span class="lvtag">Buy above</span><span class="lvval good">₹${L.buy_above}</span>
+      <div class="lvrow"><span class="lvtag">Buy above</span><span class="lvval good">${rupee(L.buy_above)}</span>
         <span class="lvdesc">a confirmed move over this = strength returning</span></div>
-      <div class="lvrow"><span class="lvtag">Now</span><span class="lvval">₹${L.price}</span>
+      <div class="lvrow"><span class="lvtag">Now</span><span class="lvval">${rupee(L.price)}</span>
         <span class="lvdesc">current price</span></div>
-      <div class="lvrow"><span class="lvtag">Support</span><span class="lvval">₹${L.support}</span>
+      <div class="lvrow"><span class="lvtag">Support</span><span class="lvval">${rupee(L.support)}</span>
         <span class="lvdesc">first floor it should hold</span></div>
-      <div class="lvrow"><span class="lvtag">Get out below</span><span class="lvval bad">₹${L.stop_below}</span>
+      <div class="lvrow"><span class="lvtag">Get out below</span><span class="lvval bad">${rupee(L.stop_below)}</span>
         <span class="lvdesc">breaking this = thesis is wrong, exit</span></div>
-      <div class="lvrow"><span class="lvtag">Overhead</span><span class="lvval">₹${L.resistance}</span>
-        <span class="lvdesc">bigger ceiling further up</span></div>
+      <div class="lvrow"><span class="lvtag">Overhead</span><span class="lvval">${rupee(L.resistance)}</span>
+        <span class="lvdesc">bigger ceiling further up (200-day avg; blank if too new)</span></div>
     </div>
     <details><summary>See the technical signals behind this (${r.rules.length})</summary>${rules}</details>
     <div class="disc">${r.disclaimer}</div>`;
