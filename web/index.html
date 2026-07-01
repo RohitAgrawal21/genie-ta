@@ -55,7 +55,11 @@ summary{cursor:pointer;font-weight:600;padding:8px 0;color:var(--acc)}
 .disc{color:var(--mut);font-size:12px;margin-top:18px;text-align:center;line-height:1.5}
 .err{background:var(--badbg);border:1px solid #f4c9c6;color:var(--bad);padding:14px 16px;border-radius:12px;margin-top:18px}
 @media(max-width:560px){.cards{grid-template-columns:1fr}.lvtag{width:88px}}
-</style></head>
+</style>
+<!-- Analytics: GoatCounter. Replace genieanalysis with your code (e.g. geniestock). -->
+<script data-goatcounter="https://genieanalysis.goatcounter.com/count"
+        async src="//gc.zgo.at/count.js"></script>
+</head>
 <body><div class="wrap">
 <h1>🧞 Genie</h1>
 <p class="sub">Systematic technical analysis for any NSE stock. Type a name or ticker, get a plain-English Buy / Hold / Sell read — no jargon.</p>
@@ -122,6 +126,10 @@ async function analyze(){
   try{
     const r=await (await fetch('/api/analyze?symbol='+encodeURIComponent(sym))).json();
     render(r);
+    // analytics: record which stock was analyzed (shows up as an event in GoatCounter)
+    if(r.ok && window.goatcounter && window.goatcounter.count){
+      window.goatcounter.count({path:'analyze/'+r.symbol, title:'Analyze '+(r.name||r.symbol), event:true});
+    }
   }catch(e){ $out.innerHTML=`<div class="err">Something went wrong. Is the server running?</div>`; }
   $go.disabled=false;
 }
