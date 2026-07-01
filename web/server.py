@@ -88,6 +88,13 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet console
         pass
 
+    def do_HEAD(self):
+        # uptime monitors (UptimeRobot etc.) probe with HEAD — answer 200, no body
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_GET(self):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
