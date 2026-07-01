@@ -1,0 +1,31 @@
+{
+  "starting_capital": 500000,
+  "max_positions": 20,
+  "mode": "intraday",
+  "poll_minutes": 15,
+  "market_open": "09:15",
+  "market_close": "15:30",
+  "timezone": "Asia/Kolkata",
+  "fill": "next_bar_open",
+  "round_trip_cost_pct": 0.25,
+  "benchmark": "^NSEI",
+  "execution": {
+    "entry_kinds": ["entry"],
+    "entry_min_rules": 3,
+    "downtrend_blocks_buys": true,
+    "exit_on_opposing_min": 2,
+    "min_hold_days": 3,
+    "exit_mode": "ema18",
+    "chandelier_atr": 3.0,
+    "stop_loss_pct": 0.08
+  },
+  "data": {
+    "eod_period": "1y",
+    "eod_interval": "1d",
+    "intraday_period": "60d",
+    "batch_size": 25,
+    "max_retries": 4,
+    "backoff_base_sec": 2,
+    "request_pause_sec": 1.0
+  }
+}

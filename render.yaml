@@ -1,0 +1,14 @@
+# Render.com blueprint — deploys the Genie TA web service straight from GitHub.
+# 1) Push this repo to GitHub.
+# 2) On render.com: New + -> Blueprint -> pick this repo. It reads this file.
+# 3) Wait for build; you get a public https URL. Auto-redeploys on every push.
+services:
+  - type: web
+    name: genie-ta
+    runtime: python
+    plan: free                       # free tier sleeps when idle (cold start ~30-60s)
+    buildCommand: pip install -r requirements.txt
+    startCommand: python web/server.py   # binds 0.0.0.0:$PORT automatically
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"

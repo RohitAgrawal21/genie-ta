@@ -1,0 +1,14 @@
+# copyrighted source material — NEVER publish
+books/
+*.epub
+*.pdf
+
+# generated engine state / caches — not source
+data/cache/
+state/
+logs/
+__pycache__/
+*.pyc
+web/_*.csv
+web/_*.log
+dashboard.html
