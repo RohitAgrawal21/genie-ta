@@ -4,7 +4,7 @@
 # 3) Wait for build; you get a public https URL. Auto-redeploys on every push.
 services:
   - type: web
-    name: genie-ta
+    name: genie-stock-technical-analysis
     runtime: python
     plan: free                       # free tier sleeps when idle (cold start ~30-60s)
     buildCommand: pip install -r requirements.txt
