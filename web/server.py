@@ -109,14 +109,38 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps({"ok": False, "error": f"Server error: {e}"}))
 
 
+_POPULAR = [  # warmed at startup so the common searches are near-instant
+    "RELIANCE", "TCS", "HDFCBANK", "ICICIBANK", "INFY", "SBIN", "TATAMOTORS",
+    "TATASTEEL", "ITC", "AXISBANK", "M&M", "BHARTIARTL", "MARUTI", "WIPRO",
+    "HCLTECH", "SUNPHARMA", "TITAN", "LT", "KOTAKBANK", "BAJFINANCE", "ADANIENT",
+    "HINDUNILVR", "ONGC", "NTPC", "POWERGRID", "COALINDIA", "JSWSTEEL", "VEDL",
+    "ZOMATO", "IRCTC", "IRFC", "TATAPOWER", "DLF", "PNB", "BEL", "HAL",
+]
+
+
+def _prewarm():
+    """Warm the data cache for the most-searched names in the background so the
+    first user request for them doesn't pay the Yahoo fetch."""
+    try:
+        e = _engine()
+        e["feed"].fetch_universe(_POPULAR)          # one batched fetch
+        e["feed"].fetch_universe([e["cfg"]["benchmark"]])
+        print(f"Pre-warmed {len(_POPULAR)} popular symbols.")
+    except Exception as ex:
+        print(f"Pre-warm skipped: {ex}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--host", default=os.environ.get("HOST", "0.0.0.0"))
+    ap.add_argument("--no-prewarm", action="store_true")
     args = ap.parse_args()
     srv = ThreadingHTTPServer((args.host, args.port), Handler)
     print(f"Genie TA server running on {args.host}:{args.port} "
           f"({len(SYMBOLS)} symbols)   (Ctrl-C to stop)")
+    if not args.no_prewarm:
+        threading.Thread(target=_prewarm, daemon=True).start()  # non-blocking
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
