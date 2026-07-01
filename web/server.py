@@ -19,10 +19,6 @@ warnings.filterwarnings("ignore")
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from engine.config import load_config
-from engine.datafeed import DataFeed
-from engine.advisor import analyze
-
 WEB = ROOT / "web"
 # Full NSE list (~2000 names) if present, else the curated fallback.
 _symfile = WEB / "symbols_full.json"
@@ -31,13 +27,25 @@ if not _symfile.exists():
 SYMBOLS = json.loads(_symfile.read_text(encoding="utf-8"))
 NAME_BY_SYM = {x["s"]: x["n"] for x in SYMBOLS}
 
-_CFG = load_config(); _CFG["mode"] = "eod"; _CFG["data"]["eod_period"] = "2y"
-_FEED = DataFeed(_CFG)
-
-# in-memory result cache so repeated/concurrent requests don't re-hit the feed
+# Heavy imports (pandas/ta/yfinance + engine) are LAZY so the server binds the
+# port instantly and Render's health check passes — no slow-startup restarts.
+# Analysis is also serialised (one at a time) to stay within the 512MB free tier.
+_ENGINE = {}          # holds analyze fn, feed, cfg after first use
+_ENGINE_LOCK = threading.Lock()
 _CACHE: dict[str, tuple[float, dict]] = {}
-_CACHE_TTL = 900  # seconds
+_CACHE_TTL = 1800
 _LOCK = threading.Lock()
+
+
+def _engine():
+    with _ENGINE_LOCK:
+        if not _ENGINE:
+            from engine.config import load_config
+            from engine.datafeed import DataFeed
+            from engine.advisor import analyze
+            cfg = load_config(); cfg["mode"] = "eod"; cfg["data"]["eod_period"] = "1y"
+            _ENGINE.update(analyze=analyze, feed=DataFeed(cfg), cfg=cfg)
+        return _ENGINE
 
 
 def cached_analyze(sym: str) -> dict:
@@ -46,7 +54,9 @@ def cached_analyze(sym: str) -> dict:
         hit = _CACHE.get(sym)
         if hit and now - hit[0] < _CACHE_TTL:
             return hit[1]
-    res = analyze(sym, _FEED, _CFG, name=NAME_BY_SYM.get(sym))
+    e = _engine()
+    with _ENGINE_LOCK:  # serialise heavy work -> avoids concurrent-request OOM
+        res = e["analyze"](sym, e["feed"], e["cfg"], name=NAME_BY_SYM.get(sym))
     with _LOCK:
         _CACHE[sym] = (now, res)
     return res
@@ -82,7 +92,9 @@ class Handler(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         try:
-            if u.path in ("/", "/index.html"):
+            if u.path == "/healthz":
+                self._send(200, "ok", "text/plain")
+            elif u.path in ("/", "/index.html"):
                 self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
             elif u.path == "/api/suggest":
                 self._send(200, json.dumps(suggest(qs.get("q", [""])[0])))

@@ -9,6 +9,7 @@ services:
     plan: free                       # free tier sleeps when idle (cold start ~30-60s)
     buildCommand: pip install -r requirements.txt
     startCommand: python web/server.py   # binds 0.0.0.0:$PORT automatically
+    healthCheckPath: /healthz            # light path — never touches the engine
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.6"
