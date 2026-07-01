@@ -119,18 +119,35 @@ function symFromInput(){
   return v.split(' ')[0].toUpperCase(); // fall back to first token as ticker
 }
 
+function loadingMsg(msg){ $out.innerHTML=`<div class="loading"><div class="spin"></div>${msg}</div>`; }
+
+async function fetchAnalyze(sym){
+  const c=new AbortController(); const t=setTimeout(()=>c.abort(),95000);
+  try{ const res=await fetch('/api/analyze?symbol='+encodeURIComponent(sym),{signal:c.signal});
+       return await res.json(); }
+  finally{ clearTimeout(t); }
+}
+
 async function analyze(){
   const sym=symFromInput(); if(!sym){return;}
   hideDrop(); $go.disabled=true;
-  $out.innerHTML=`<div class="loading"><div class="spin"></div>Reading the charts for <b>${sym}</b>…</div>`;
-  try{
-    const r=await (await fetch('/api/analyze?symbol='+encodeURIComponent(sym))).json();
+  loadingMsg(`Reading the charts for <b>${sym}</b>… (first load can take a few seconds)`);
+  let r=null;
+  for(let attempt=1; attempt<=3; attempt++){
+    try{ r=await fetchAnalyze(sym); break; }
+    catch(e){
+      if(attempt<3){ loadingMsg(`Server is waking up — retrying <b>${sym}</b> (${attempt}/2)…`);
+                     await new Promise(s=>setTimeout(s,4000)); }
+    }
+  }
+  if(r){
     render(r);
-    // analytics: record which stock was analyzed (shows up as an event in GoatCounter)
     if(r.ok && window.goatcounter && window.goatcounter.count){
       window.goatcounter.count({path:'analyze/'+r.symbol, title:'Analyze '+(r.name||r.symbol), event:true});
     }
-  }catch(e){ $out.innerHTML=`<div class="err">Something went wrong. Is the server running?</div>`; }
+  } else {
+    $out.innerHTML=`<div class="err">The server is waking up or busy. Please wait ~30 seconds and click Analyze again.</div>`;
+  }
   $go.disabled=false;
 }
 
