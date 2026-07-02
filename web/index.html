@@ -21,6 +21,8 @@ box-shadow:0 12px 30px rgba(20,30,60,.12);z-index:20;overflow:hidden;display:non
 .opt{padding:11px 16px;cursor:pointer;display:flex;justify-content:space-between;gap:10px}
 .opt:hover,.opt.active{background:#eef3ff}
 .opt .sym{font-weight:700}.opt .nm{color:var(--mut);font-size:13px;text-align:right}
+.exch{font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;vertical-align:middle}
+.exch.nse{background:#e6f0ff;color:#2f6bff}.exch.bse{background:#fff0e6;color:#c8600a}
 .hint{color:var(--mut);font-size:12.5px;margin:8px 2px 0}
 .loading{text-align:center;color:var(--mut);padding:40px}
 .spin{width:26px;height:26px;border:3px solid var(--bd);border-top-color:var(--acc);border-radius:50%;
@@ -87,7 +89,8 @@ function renderDrop(){
   if(!items.length){hideDrop();return;}
   $drop.innerHTML=items.map((x,i)=>
     `<div class="opt${i===active?' active':''}" data-i="${i}">
-       <span class="sym">${x.s}</span><span class="nm">${x.n}</span></div>`).join('');
+       <span class="sym">${x.s} <span class="exch ${(x.exch||'NSE').toLowerCase()}">${x.exch||'NSE'}</span></span>
+       <span class="nm">${x.n}</span></div>`).join('');
   $drop.style.display='block';
   [...$drop.children].forEach(el=>el.onclick=()=>choose(+el.dataset.i));
 }
@@ -113,31 +116,36 @@ $q.addEventListener('keydown',e=>{
 document.addEventListener('click',e=>{if(!$drop.contains(e.target)&&e.target!==$q)hideDrop();});
 $go.onclick=analyze;
 
-function symFromInput(){
-  if(chosen) return chosen.s;
+function selFromInput(){
+  // returns {t: ticker to send, n: name, label: for display}
+  if(chosen) return {t:chosen.t, n:chosen.n, label:chosen.s};
   const v=$q.value.trim();
-  if(items.length&&(v.toUpperCase()===items[0].s||v.toLowerCase().includes(items[0].n.toLowerCase()))) return items[0].s;
-  return v.split(' ')[0].toUpperCase(); // fall back to first token as ticker
+  if(items.length){ const x=items[0];
+    if(v.toUpperCase()===x.s.toUpperCase()||v.toLowerCase().includes(x.n.toLowerCase()))
+      return {t:x.t, n:x.n, label:x.s}; }
+  const raw=v.split(' ')[0].toUpperCase();
+  return {t:raw, n:null, label:raw};
 }
 
 function loadingMsg(msg){ $out.innerHTML=`<div class="loading"><div class="spin"></div>${msg}</div>`; }
 
-async function fetchAnalyze(sym){
+async function fetchAnalyze(sel){
   const c=new AbortController(); const t=setTimeout(()=>c.abort(),95000);
-  try{ const res=await fetch('/api/analyze?symbol='+encodeURIComponent(sym),{signal:c.signal});
-       return await res.json(); }
+  let url='/api/analyze?symbol='+encodeURIComponent(sel.t);
+  if(sel.n) url+='&name='+encodeURIComponent(sel.n);
+  try{ const res=await fetch(url,{signal:c.signal}); return await res.json(); }
   finally{ clearTimeout(t); }
 }
 
 async function analyze(){
-  const sym=symFromInput(); if(!sym){return;}
+  const sel=selFromInput(); if(!sel.t){return;}
   hideDrop(); $go.disabled=true;
-  loadingMsg(`Reading the charts for <b>${sym}</b>… (first load can take a few seconds)`);
+  loadingMsg(`Reading the charts for <b>${sel.label}</b>… (first load can take a few seconds)`);
   let r=null;
   for(let attempt=1; attempt<=3; attempt++){
-    try{ r=await fetchAnalyze(sym); break; }
+    try{ r=await fetchAnalyze(sel); break; }
     catch(e){
-      if(attempt<3){ loadingMsg(`Server is waking up — retrying <b>${sym}</b> (${attempt}/2)…`);
+      if(attempt<3){ loadingMsg(`Server is waking up — retrying <b>${sel.label}</b> (${attempt}/2)…`);
                      await new Promise(s=>setTimeout(s,4000)); }
     }
   }

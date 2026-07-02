@@ -11,6 +11,7 @@ Endpoints:
 """
 from __future__ import annotations
 import argparse, json, os, sys, time, threading, warnings
+import urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
@@ -48,15 +49,16 @@ def _engine():
         return _ENGINE
 
 
-def cached_analyze(sym: str) -> dict:
+def cached_analyze(sym: str, name: str | None = None) -> dict:
     now = time.time()
     with _LOCK:
         hit = _CACHE.get(sym)
         if hit and now - hit[0] < _CACHE_TTL:
             return hit[1]
     e = _engine()
+    nm = name or NAME_BY_SYM.get(sym) or NAME_BY_SYM.get(sym.rsplit(".", 1)[0])
     with _ENGINE_LOCK:  # serialise heavy work -> avoids concurrent-request OOM
-        res = e["analyze"](sym, e["feed"], e["cfg"], name=NAME_BY_SYM.get(sym))
+        res = e["analyze"](sym, e["feed"], e["cfg"], name=nm)
     with _LOCK:
         _CACHE[sym] = (now, res)
     return res
@@ -79,18 +81,67 @@ def dumps(o) -> str:
     return json.dumps(_clean(o))
 
 
+_SEARCH_CACHE: dict[str, tuple[float, list]] = {}
+_SEARCH_TTL = 900
+
+
+def yahoo_search(q: str) -> list:
+    """Resolve any query to real NSE/BSE tickers via Yahoo's search API. This is
+    how BSE-only names (e.g. Merritronix -> MRTX.BO) get found — their Yahoo
+    ticker isn't guessable from the name. Cached + fails soft."""
+    key = q.lower()
+    now = time.time()
+    hit = _SEARCH_CACHE.get(key)
+    if hit and now - hit[0] < _SEARCH_TTL:
+        return hit[1]
+    out = []
+    try:
+        url = ("https://query2.finance.yahoo.com/v1/finance/search?q="
+               + urllib.parse.quote(q) + "&quotesCount=10&newsCount=0")
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        for it in data.get("quotes", []):
+            sym = it.get("symbol", "")
+            if sym.endswith(".NS") or sym.endswith(".BO"):
+                out.append({"s": sym.rsplit(".", 1)[0],
+                            "n": it.get("shortname") or it.get("longname") or sym,
+                            "t": sym, "exch": "NSE" if sym.endswith(".NS") else "BSE"})
+    except Exception:
+        pass
+    _SEARCH_CACHE[key] = (now, out)
+    return out
+
+
 def suggest(q: str, limit=10):
-    q = (q or "").strip().upper()
+    q = (q or "").strip()
     if not q:
         return []
-    starts, contains = [], []
-    for x in SYMBOLS:
+    qu = q.upper()
+    exact, symstart, namestart, contains = [], [], [], []
+    for x in SYMBOLS:                       # fast local NSE list first, best-ranked
         s, n = x["s"].upper(), x["n"].upper()
-        if s.startswith(q) or n.startswith(q):
-            starts.append(x)
-        elif q in s or q in n:
-            contains.append(x)
-    return (starts + contains)[:limit]
+        item = {"s": x["s"], "n": x["n"], "t": x["s"], "exch": "NSE"}
+        if s == qu:
+            exact.append(item)
+        elif s.startswith(qu):
+            symstart.append(item)
+        elif n.startswith(qu):
+            namestart.append(item)
+        elif qu in s or qu in n:
+            contains.append(item)
+    results = (exact + symstart + namestart + contains)[:limit]
+    # If the local NSE list is thin on matches, ask Yahoo — this is where BSE-only
+    # stocks (and anything not on NSE) come from.
+    if len(results) < limit:
+        have = {r["t"].upper() for r in results} | {r["s"].upper() for r in results}
+        for y in yahoo_search(q):
+            if y["s"].upper() not in have and y["t"].upper() not in have:
+                results.append(y)
+                have.add(y["s"].upper())
+            if len(results) >= limit:
+                break
+    return results[:limit]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -124,9 +175,10 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, dumps(suggest(qs.get("q", [""])[0])))
             elif u.path == "/api/analyze":
                 sym = qs.get("symbol", [""])[0].strip().upper()
+                nm = qs.get("name", [""])[0].strip() or None
                 if not sym:
                     self._send(400, dumps({"ok": False, "error": "No symbol given."})); return
-                self._send(200, dumps(cached_analyze(sym)))
+                self._send(200, dumps(cached_analyze(sym, nm)))
             else:
                 self._send(404, dumps({"error": "not found"}))
         except Exception as e:  # never 500 the whole app

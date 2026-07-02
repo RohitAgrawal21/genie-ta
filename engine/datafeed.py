@@ -34,9 +34,12 @@ def _nearest_interval(poll_minutes: int) -> str:
 
 
 def to_yf(symbol: str) -> str:
-    """Bare NSE symbol -> yfinance ticker. Indices (start with ^) pass through."""
+    """Bare NSE symbol -> yfinance ticker. Anything already carrying an exchange
+    suffix (RELIANCE.NS, MRTX.BO) or an index (^NSEI) passes through unchanged."""
     s = symbol.strip().upper()
-    return s if s.startswith("^") else f"{s}.NS"
+    if s.startswith("^") or "." in s:
+        return s
+    return f"{s}.NS"
 
 
 class DataFeed:
