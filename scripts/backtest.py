@@ -27,8 +27,11 @@ from engine.signal_engine import _net_signal, market_regime
 from engine import portfolio as PF
 
 
+DISABLED = set()
+
+
 def mini_signal(d, i):
-    fired = evaluate_all(d, i)
+    fired = evaluate_all(d, i, disabled=DISABLED)
     net = _net_signal(fired)
     trail = d["ema_slow"].iat[i]
     atr = d["atr"].iat[i]
@@ -75,6 +78,7 @@ def main():
     ap.add_argument("--entry-min", type=int, help="override execution.entry_min_rules")
     ap.add_argument("--oos", type=float, default=0.0,
                     help="hold out the last fraction (e.g. 0.33) as out-of-sample")
+    ap.add_argument("--disable", default="", help="comma-separated rule_ids to prune")
     args = ap.parse_args()
 
     cfg = load_config(); cfg["mode"] = "eod"
@@ -83,6 +87,10 @@ def main():
         cfg["execution"]["exit_mode"] = args.exit
     if args.entry_min:
         cfg["execution"]["entry_min_rules"] = args.entry_min
+    global DISABLED
+    DISABLED = set(x.strip() for x in args.disable.split(",") if x.strip())
+    if DISABLED:
+        print(f"Pruned rules ({len(DISABLED)}): {sorted(DISABLED)}")
     universe = load_universe()
     syms = universe if args.all else universe[:args.n]
     feed = DataFeed(cfg)

@@ -31,6 +31,7 @@ DEFAULT_CONFIG = {
         "min_hold_days": 3,           # ignore exit signals before this (except stop)
         "use_ema_trail": True,        # exit on close below trailing 18-EMA
         "stop_loss_pct": 0.08,        # hard stop
+        "disabled_rules": [],         # rule_ids pruned for poor backtest performance
     },
 }
 

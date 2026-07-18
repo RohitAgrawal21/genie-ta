@@ -6,15 +6,39 @@ reason, jargon-free "what's going on" cards, key price levels, and the underlyin
 rules (for the curious). This is systematic analysis, NOT licensed advice.
 """
 from __future__ import annotations
+import numpy as np
 import pandas as pd
 
 from .indicators import compute_indicators
 from .rules import evaluate_all
 from .signal_engine import _net_signal, market_regime
+from .factors import raw_factors
+from . import universe_scan
+from .fundamentals import fetch as fetch_fund
+from .datafeed import to_yf
 
 
 def _tone(good):
     return "good" if good else "bad"
+
+
+def _beta(stock_close: pd.Series, bench_close: pd.Series, lookback=252) -> float | None:
+    """Beta vs the benchmark, computed from aligned daily returns (exact — we do
+    NOT use yfinance's unreliable India beta)."""
+    if bench_close is None or len(stock_close) < 60:
+        return None
+    j = pd.concat([stock_close.rename("s"), bench_close.rename("b")], axis=1).dropna()
+    j = j.iloc[-lookback:]
+    if len(j) < 60:
+        return None
+    rs = j["s"].pct_change().dropna()
+    rb = j["b"].pct_change().dropna()
+    common = rs.index.intersection(rb.index)
+    rs, rb = rs.loc[common], rb.loc[common]
+    var = float(np.var(rb))
+    if var == 0:
+        return None
+    return round(float(np.cov(rs, rb)[0, 1] / var), 2)
 
 
 def analyze(symbol: str, feed, cfg: dict, name: str | None = None) -> dict:
@@ -169,10 +193,40 @@ def analyze(symbol: str, feed, cfg: dict, name: str | None = None) -> dict:
     if limited_history and conf == "high":
         conf = "medium"
 
+    # ---------- Genie Score (multi-factor) + validated fundamentals ----------
+    bare = symbol.rsplit(".", 1)[0]
+    rk = universe_scan.load()
+    score_block, funds, fund_meta, in_universe = None, {}, {}, False
+    if rk and (symbol in rk["scores"] or bare in rk["scores"]):
+        key = symbol if symbol in rk["scores"] else bare
+        sc = rk["scores"][key]
+        score_block = {"genie_score": sc.get("genie_score"),
+                       "subscores": sc.get("subscores", {}),
+                       "rank": sc.get("rank"), "rank_total": sc.get("rank_total"),
+                       "percentile": sc.get("percentile")}
+        funds = sc.get("fundamentals", {})
+        fund_meta = {"source": sc.get("fund_source"), "as_of": sc.get("fund_as_of")}
+        in_universe = True
+    elif rk:  # not tracked — score this stock against the cached universe
+        rf = raw_factors(d, bench["Close"] if bench is not None else None)
+        fu = fetch_fund(symbol, to_yf(symbol), price=px)
+        rf["value_raw"], rf["quality_raw"] = fu.get("value_raw"), fu.get("quality_raw")
+        s1 = universe_scan.score_against(rf, rk["dist"], rk["weights"])
+        score_block = {"genie_score": s1["genie_score"], "subscores": s1["subscores"],
+                       "rank": None, "rank_total": rk["universe_size"], "percentile": None}
+        funds, fund_meta = fu["fields"], {"source": fu["source"], "as_of": fu["as_of"]}
+    beta = _beta(d["Close"], bench["Close"] if bench is not None else None)
+
     return {
         "ok": True, "symbol": symbol, "name": name,
         "as_of": d.index[i].strftime("%Y-%m-%d"),
         "price": round(px, 1),
+        "genie_score": (score_block or {}).get("genie_score"),
+        "score": score_block,
+        "in_universe": in_universe,
+        "beta_vs_nifty": beta,
+        "fundamentals": funds,
+        "fundamentals_meta": fund_meta,
         "history_months": history_months,
         "limited_history": limited_history,
         "history_note": (

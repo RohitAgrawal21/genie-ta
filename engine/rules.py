@@ -958,12 +958,16 @@ REGISTRY = [
 REGISTRY_BY_ID = {r["rule_id"]: r for r in REGISTRY}
 
 
-def evaluate_all(d, i=-1) -> list[RuleResult]:
-    """Run every rule at position i (default last bar). Returns only FIRED results."""
+def evaluate_all(d, i=-1, disabled=None) -> list[RuleResult]:
+    """Run every rule at position i (default last bar). Returns only FIRED results.
+    `disabled` is a set/list of rule_ids to skip (pruned rules)."""
     if i < 0:
         i = len(d) + i
+    disabled = set(disabled or ())
     out = []
     for r in REGISTRY:
+        if r["rule_id"] in disabled:
+            continue
         try:
             res = r["fn"](d, i)
             if res.fired:
