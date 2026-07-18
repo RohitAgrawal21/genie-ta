@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine.config import load_config, load_universe
 from engine.datafeed import DataFeed
-from engine.universe_scan import scan, save, RANKINGS_FILE
+from engine.universe_scan import scan, scan_liquid, save, RANKINGS_FILE
 
 
 def main():
@@ -22,14 +22,26 @@ def main():
     ap.add_argument("--n", type=int, default=100)
     ap.add_argument("--period", default="2y")
     ap.add_argument("--no-fundamentals", action="store_true")
+    ap.add_argument("--all", action="store_true", help="scan the full NSE list (web/symbols_full.json)")
+    ap.add_argument("--liquid", type=int, default=0,
+                    help="scan all NSE, keep the top-N most liquid by turnover (recommended)")
     args = ap.parse_args()
 
     cfg = load_config(); cfg["mode"] = "eod"; cfg["data"]["eod_period"] = args.period
     feed = DataFeed(cfg)
-    syms = load_universe()[:args.n]
-    print(f"Scanning {len(syms)} names (fundamentals={not args.no_fundamentals})...")
     t0 = time.time()
-    res = scan(feed, cfg, syms, with_fundamentals=not args.no_fundamentals)
+    if args.liquid:
+        print(f"Liquidity-filtered scan: top {args.liquid} NSE names by turnover...")
+        res = scan_liquid(feed, cfg, top_n=args.liquid)
+    else:
+        if args.all:
+            import json
+            full = json.loads((Path(__file__).resolve().parent.parent / "web" / "symbols_full.json").read_text(encoding="utf-8"))
+            syms = [x["s"] for x in full]
+        else:
+            syms = load_universe()[:args.n]
+        print(f"Scanning {len(syms)} names (fundamentals={not args.no_fundamentals})...")
+        res = scan(feed, cfg, syms, with_fundamentals=not args.no_fundamentals)
     save(res)
 
     top = sorted([s for s in res["scores"] if res["scores"][s]["genie_score"] is not None],

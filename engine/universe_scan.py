@@ -115,6 +115,45 @@ def scan(feed, cfg, symbols: list[str], with_fundamentals=True, log=None) -> dic
     }
 
 
+def scan_liquid(feed, cfg, top_n: int = 500, log=None) -> dict:
+    """Proper investable universe: fetch ALL NSE prices, keep the top_n by
+    20-day turnover (liquidity filter), then score those with fundamentals.
+    This is what a factor platform does — rank comparable, liquid names."""
+    import json as _json
+    full = _json.loads((paths.ROOT / "web" / "symbols_full.json").read_text(encoding="utf-8"))
+    all_syms = [x["s"] for x in full]
+    if log:
+        log.info("fetching prices for %d NSE names...", len(all_syms))
+    data, failed = feed.fetch_universe(all_syms)
+    bench_data, _ = feed.fetch_universe([cfg["benchmark"]])
+    bench_close = bench_data.get(cfg["benchmark"], pd.DataFrame()).get("Close")
+
+    raws = {}
+    for s, df in data.items():
+        if len(df) < 130:
+            continue
+        raws[s] = raw_factors(compute_indicators(df), bench_close)
+    top = sorted(raws, key=lambda s: (raws[s].get("turnover") or 0), reverse=True)[:top_n]
+    raws = {s: raws[s] for s in top}
+    if log:
+        log.info("kept top %d by turnover; pulling fundamentals...", len(raws))
+
+    funds = {}
+    for s in raws:
+        fu = fetch_fund(s, to_yf(s), price=raws[s]["price"])
+        raws[s]["value_raw"], raws[s]["quality_raw"] = fu.get("value_raw"), fu.get("quality_raw")
+        funds[s] = {"fields": fu["fields"], "source": fu["source"], "as_of": fu["as_of"]}
+
+    scored = cross_sectional_scores(raws, BALANCED_WEIGHTS)
+    for s in scored:
+        scored[s]["fundamentals"] = funds.get(s, {}).get("fields", {})
+        scored[s]["fund_source"] = funds.get(s, {}).get("source")
+        scored[s]["fund_as_of"] = funds.get(s, {}).get("as_of")
+    return {"as_of": date.today().isoformat(), "weights": BALANCED_WEIGHTS,
+            "universe_size": len(scored), "failed": len(failed),
+            "dist": _dist(raws), "scores": scored}
+
+
 def save(result: dict):
     RANKINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
     RANKINGS_FILE.write_text(json.dumps(result), encoding="utf-8")

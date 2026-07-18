@@ -1,0 +1,36 @@
+name: Daily Genie rankings
+
+# Rebuilds the liquid-universe leaderboard (web/rankings.json) each evening after
+# the NSE close and commits it, so the live site's Top Picks stays current.
+# Also runnable manually from the Actions tab.
+on:
+  schedule:
+    - cron: "30 11 * * 1-5"   # 11:30 UTC = 17:00 IST, ~90 min after close, weekdays
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Build rankings (top 500 liquid)
+        run: python scripts/build_rankings.py --liquid 500 --period 2y
+      - name: Commit if changed
+        run: |
+          git config user.name "genie-bot"
+          git config user.email "genie-bot@users.noreply.github.com"
+          git add web/rankings.json
+          if git diff --cached --quiet; then
+            echo "No ranking changes."
+          else
+            git commit -m "Daily rankings refresh [skip ci]"
+            git push
+          fi

@@ -12,3 +12,5 @@ __pycache__/
 web/_*.csv
 web/_*.log
 dashboard.html
+
+.claude/

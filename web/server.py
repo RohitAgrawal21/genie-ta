@@ -64,6 +64,29 @@ def cached_analyze(sym: str, name: str | None = None) -> dict:
     return res
 
 
+RANKINGS_FILE = ROOT / "web" / "rankings.json"
+
+
+def leaderboard(limit=100):
+    """Compact ranked list from the daily rankings file (no engine import)."""
+    try:
+        rk = json.loads(RANKINGS_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {"as_of": None, "total": 0, "rows": []}
+    rows = []
+    for sym, v in rk.get("scores", {}).items():
+        if v.get("genie_score") is None:
+            continue
+        rows.append({"s": sym,
+                     "n": NAME_BY_SYM.get(sym) or NAME_BY_SYM.get(sym.rsplit(".", 1)[0]) or sym,
+                     "score": v["genie_score"], "rank": v.get("rank"),
+                     "sub": v.get("subscores", {}),
+                     "pe": (v.get("fundamentals") or {}).get("pe")})
+    rows.sort(key=lambda r: r["score"], reverse=True)
+    return {"as_of": rk.get("as_of"), "total": len(rows),
+            "weights": rk.get("weights"), "rows": rows[:limit]}
+
+
 def _clean(o):
     """Recursively replace NaN/Inf with None so browsers can JSON.parse the reply
     (Python emits bare NaN which is invalid JSON and breaks the frontend)."""
@@ -171,6 +194,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, "ok", "text/plain")
             elif u.path in ("/", "/index.html"):
                 self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
+            elif u.path == "/api/leaderboard":
+                try:
+                    lim = int(qs.get("limit", ["100"])[0])
+                except ValueError:
+                    lim = 100
+                self._send(200, dumps(leaderboard(lim)))
             elif u.path == "/api/suggest":
                 self._send(200, dumps(suggest(qs.get("q", [""])[0])))
             elif u.path == "/api/analyze":
