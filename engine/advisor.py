@@ -6,20 +6,46 @@ reason, jargon-free "what's going on" cards, key price levels, and the underlyin
 rules (for the curious). This is systematic analysis, NOT licensed advice.
 """
 from __future__ import annotations
+import json
 import numpy as np
 import pandas as pd
 
+from . import paths
 from .indicators import compute_indicators
 from .rules import evaluate_all
 from .signal_engine import _net_signal, market_regime
 from .factors import raw_factors
 from . import universe_scan
-from .fundamentals import fetch as fetch_fund
-from .datafeed import to_yf
 
 
 def _tone(good):
     return "good" if good else "bad"
+
+
+# Fundamentals come from the committed offline cache (web/fundamentals.json) —
+# the live server can't fetch Yahoo's fundamentals endpoint. Reloaded when the
+# file changes (i.e. after a daily refresh / redeploy).
+_FUND = {"mtime": None, "data": {}}
+
+
+def _load_fundamentals() -> dict:
+    p = paths.ROOT / "web" / "fundamentals.json"
+    try:
+        m = p.stat().st_mtime
+    except OSError:
+        return {}
+    if _FUND["mtime"] != m:
+        try:
+            _FUND["data"] = json.loads(p.read_text(encoding="utf-8")).get("f", {})
+            _FUND["mtime"] = m
+        except Exception:
+            _FUND["data"] = {}
+    return _FUND["data"]
+
+
+def _fund_lookup(symbol: str, bare: str) -> dict:
+    d = _load_fundamentals()
+    return d.get(symbol) or d.get(bare) or {}
 
 
 def _beta(stock_close: pd.Series, bench_close: pd.Series, lookback=252) -> float | None:
@@ -196,7 +222,10 @@ def analyze(symbol: str, feed, cfg: dict, name: str | None = None) -> dict:
     # ---------- Genie Score (multi-factor) + validated fundamentals ----------
     bare = symbol.rsplit(".", 1)[0]
     rk = universe_scan.load()
-    score_block, funds, fund_meta, in_universe = None, {}, {}, False
+    fu = _fund_lookup(symbol, bare)              # from committed cache, never live
+    funds = fu.get("fields", {})
+    fund_meta = {"source": "Yahoo Finance (yfinance)", "as_of": fu.get("as_of")} if funds else {}
+    score_block, in_universe = None, False
     if rk and (symbol in rk["scores"] or bare in rk["scores"]):
         key = symbol if symbol in rk["scores"] else bare
         sc = rk["scores"][key]
@@ -204,17 +233,16 @@ def analyze(symbol: str, feed, cfg: dict, name: str | None = None) -> dict:
                        "subscores": sc.get("subscores", {}),
                        "rank": sc.get("rank"), "rank_total": sc.get("rank_total"),
                        "percentile": sc.get("percentile")}
-        funds = sc.get("fundamentals", {})
-        fund_meta = {"source": sc.get("fund_source"), "as_of": sc.get("fund_as_of")}
         in_universe = True
-    elif rk:  # not tracked — score this stock against the cached universe
+        if not funds:                            # fall back to rankings' own copy
+            funds = sc.get("fundamentals", {})
+            fund_meta = {"source": sc.get("fund_source"), "as_of": sc.get("fund_as_of")}
+    elif rk:  # not tracked — score this stock against the cached universe distribution
         rf = raw_factors(d, bench["Close"] if bench is not None else None)
-        fu = fetch_fund(symbol, to_yf(symbol), price=px)
         rf["value_raw"], rf["quality_raw"] = fu.get("value_raw"), fu.get("quality_raw")
         s1 = universe_scan.score_against(rf, rk["dist"], rk["weights"])
         score_block = {"genie_score": s1["genie_score"], "subscores": s1["subscores"],
                        "rank": None, "rank_total": rk["universe_size"], "percentile": None}
-        funds, fund_meta = fu["fields"], {"source": fu["source"], "as_of": fu["as_of"]}
     beta = _beta(d["Close"], bench["Close"] if bench is not None else None)
 
     return {
