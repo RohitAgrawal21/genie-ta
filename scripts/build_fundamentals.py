@@ -31,9 +31,18 @@ def main():
     print(f"Fetching prices for {len(syms)} NSE names (for PE reconciliation)...")
     data, _ = feed.fetch_universe(syms)
 
-    out = {"as_of": date.today().isoformat(), "source": "Yahoo Finance (yfinance)", "f": {}}
+    # merge with existing so a throttled run can only add/refresh, never shrink coverage
+    existing = {}
+    if OUT.exists():
+        try:
+            existing = json.loads(OUT.read_text(encoding="utf-8")).get("f", {})
+        except Exception:
+            existing = {}
+    out = {"as_of": date.today().isoformat(), "source": "Yahoo Finance (yfinance)",
+           "f": dict(existing)}
     ok = 0
     t0 = time.time()
+    print(f"(starting from {len(existing)} existing entries)")
     for n, s in enumerate(syms, 1):
         df = data.get(s)
         px = float(df["Close"].iloc[-1]) if df is not None and len(df) else None
